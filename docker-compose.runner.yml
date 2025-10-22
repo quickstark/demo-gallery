@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  runner:
+    image: myoung34/github-runner:latest
+    container_name: quickstarkdemo-runner
+    restart: unless-stopped
+    environment:
+      # Organization URL (not specific repo!)
+      REPO_URL: https://github.com/quickstarkdemo
+
+      # Runner name
+      RUNNER_NAME: github-runner
+
+      # IMPORTANT: Token must be fresh (expires in 1 hour)
+      # Get with: gh api -X POST orgs/quickstarkdemo/actions/runners/registration-token --jq '.token'
+      RUNNER_TOKEN: AEFUERTAYMRVGSHWKTBFU6LI7FKMI
+
+      # Working directory inside container
+      RUNNER_WORKDIR: /tmp/github-runner
+
+      # Runner labels for workflow matching
+      LABELS: self-hosted,Linux,X64,ubuntu,docker
+
+      # Ephemeral mode (auto-deregister after job)
+      EPHEMERAL: "false"
+
+      # Allow runner to auto-update
+      DISABLE_AUTO_UPDATE: "false"
+
+    volumes:
+      # Docker socket for docker-in-docker
+      - /var/run/docker.sock:/var/run/docker.sock
+
+      # Runner work directory (NOT config directory - causes issues)
+      - /docker/appdata/github-runner:/tmp/github-runner
+
+    networks:
+      - runner-network
+
+networks:
+  runner-network:
+    driver: bridge

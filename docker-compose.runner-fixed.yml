@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  runner:
+    image: myoung34/github-runner:latest
+    container_name: quickstarkdemo-runner
+    hostname: quickstarkdemo-runner
+    restart: unless-stopped
+    privileged: true
+
+    environment:
+      # GitHub Configuration - FIXED
+      RUNNER_SCOPE: org
+      ORG_NAME: quickstarkdemo  # ← FIXED: Was "quickstark" (personal account)
+      ACCESS_TOKEN: ${GITHUB_PAT}  # ← Use .env file, not hardcoded
+      RUNNER_NAME: quickstarkdemo-runner
+      RUNNER_WORKDIR: /tmp/runner/work
+      RUNNER_GROUP: default
+      LABELS: self-hosted,linux,x64,ubuntu,docker
+      EPHEMERAL: "false"
+      DISABLE_AUTO_UPDATE: "false"
+
+      # Datadog Configuration (optional - for demo-gallery)
+      DD_API_KEY: ${DD_API_KEY}
+      DD_APP_KEY: ${DD_APP_KEY}
+      DD_SITE: datadoghq.com
+      DD_SERVICE: demo-gallery
+      DD_ENV: production
+
+      NODE_PATH: /usr/lib/node_modules:/usr/local/lib/node_modules
+      PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/node_modules/.bin:/usr/local/lib/node_modules/.bin
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOME}/.docker:/root/.docker:ro
+      - /docker/appdata/quickstarkdemo-runner/work:/tmp/runner/work
+      - /docker/appdata/quickstarkdemo-runner/tools:/opt/hostedtoolcache
+      - /docker/appdata/quickstarkdemo-runner/npm-cache:/root/.npm
+      - /docker/appdata/quickstarkdemo-runner/pip-cache:/root/.cache/pip
+      # REMOVED: config volume persistence (causes stale config issues)
+
+    group_add:
+      - 988
+
+    networks:
+      - runner-network
+
+    extra_hosts:
+      - "datadog-agent:192.168.1.200"
+
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'Runner.Listener' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+networks:
+  runner-network:
+    driver: bridge

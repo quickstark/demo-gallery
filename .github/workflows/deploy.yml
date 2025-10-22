@@ -354,6 +354,37 @@ jobs:
             echo "Check the logs above for details"
           fi
 
+      # Install datadog-ci if needed
+      - name: Setup Datadog CI
+        if: steps.docker_build.outcome == 'success'
+        continue-on-error: true
+        run: |
+          echo "=========================================="
+          echo "Setting up Datadog CI tools"
+          echo "=========================================="
+
+          # Check if Node.js is installed
+          if ! command -v node &> /dev/null; then
+            echo "📦 Installing Node.js..."
+            sudo apt-get update -qq
+            sudo apt-get install -y nodejs npm
+            echo "✓ Node.js installed: $(node --version)"
+            echo "✓ npm installed: $(npm --version)"
+          else
+            echo "✓ Node.js already available: $(node --version)"
+          fi
+
+          # Check if datadog-ci is installed
+          if ! command -v datadog-ci &> /dev/null; then
+            echo "📦 Installing datadog-ci..."
+            sudo npm install -g @datadog/datadog-ci
+            echo "✓ datadog-ci installed: $(datadog-ci version)"
+          else
+            echo "✓ datadog-ci already available: $(datadog-ci version)"
+          fi
+
+          echo "=========================================="
+
       # Mark Deployment in Datadog
       - name: Mark Deployment in Datadog
         if: steps.docker_build.outcome == 'success'

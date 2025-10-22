@@ -1,0 +1,23 @@
+# Custom GitHub Actions Runner with Datadog CI pre-installed
+# Based on myoung34/github-runner with additional tools
+
+FROM myoung34/github-runner:latest
+
+# Install Node.js 20 LTS and datadog-ci
+RUN apt-get update && \
+    apt-get install -y curl && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    npm install -g @datadog/datadog-ci && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Verify installations
+RUN node --version && \
+    npm --version && \
+    datadog-ci version
+
+# Label for identification
+LABEL maintainer="quickstarkdemo" \
+      description="GitHub Actions Runner with Node.js and Datadog CI" \
+      version="1.0.0"
