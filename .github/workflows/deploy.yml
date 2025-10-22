@@ -277,17 +277,17 @@ jobs:
           docker stop demo-gallery 2>/dev/null || echo "No container named demo-gallery"
           docker rm -f demo-gallery 2>/dev/null || echo "No container to remove"
 
-          # Stop any container using port 8080 (regardless of name)
-          echo "Checking for containers using port 8080..."
-          PORT_8080_CONTAINER=$(docker ps --filter "publish=8080" --format "{{.Names}}" | head -1)
-          if [ -n "$PORT_8080_CONTAINER" ]; then
-            echo "⚠️  Found container using port 8080: $PORT_8080_CONTAINER"
+          # Stop any container using port 9090 (regardless of name)
+          echo "Checking for containers using port 9090..."
+          PORT_9090_CONTAINER=$(docker ps --filter "publish=9090" --format "{{.Names}}" | head -1)
+          if [ -n "$PORT_9090_CONTAINER" ]; then
+            echo "⚠️  Found container using port 9090: $PORT_9090_CONTAINER"
             echo "Stopping it to free the port..."
-            docker stop "$PORT_8080_CONTAINER"
-            docker rm -f "$PORT_8080_CONTAINER"
-            echo "✅ Port 8080 freed"
+            docker stop "$PORT_9090_CONTAINER"
+            docker rm -f "$PORT_9090_CONTAINER"
+            echo "✅ Port 9090 freed"
           else
-            echo "✅ Port 8080 is available"
+            echo "✅ Port 9090 is available"
           fi
 
           # Clean up old images to save space
@@ -303,7 +303,7 @@ jobs:
           docker run -d \
             --name demo-gallery \
             --restart unless-stopped \
-            -p 8080:80 \
+            -p 9090:80 \
             --add-host=host.docker.internal:host-gateway \
             -e VITE_API_URL="${{ secrets.VITE_API_URL }}" \
             -e VITE_API_KEY="${{ secrets.VITE_API_KEY }}" \
@@ -327,17 +327,17 @@ jobs:
 
           # Check health endpoint
           echo "Checking health endpoint..."
-          if curl -f http://localhost:8080/health 2>/dev/null; then
-            echo "✅ Health check passed - Gallery is running on port 8080"
-          elif curl -f http://localhost:8080/ 2>/dev/null; then
-            echo "✅ Root endpoint accessible on port 8080"
+          if curl -f http://localhost:9090/health 2>/dev/null; then
+            echo "✅ Health check passed - Gallery is running on port 9090"
+          elif curl -f http://localhost:9090/ 2>/dev/null; then
+            echo "✅ Root endpoint accessible on port 9090"
           else
             echo "⚠️  Health check failed - checking container logs..."
             docker logs --tail 50 demo-gallery
           fi
 
           echo "✅ Deployment complete!"
-          echo "Application is running at: http://localhost:8080"
+          echo "Application is running at: http://localhost:9090"
 
       # ===== Post-Deployment =====
       - name: Deployment Notification
