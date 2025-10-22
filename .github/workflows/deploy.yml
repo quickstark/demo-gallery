@@ -272,10 +272,23 @@ jobs:
         run: |
           echo "=== Deploying React Gallery to Local Docker ==="
 
-          # Stop and remove existing container
-          echo "Stopping existing container..."
-          docker stop demo-gallery 2>/dev/null || echo "No existing container to stop"
-          docker rm -f demo-gallery 2>/dev/null || echo "No existing container to remove"
+          # Stop and remove existing container by name
+          echo "Stopping existing container by name..."
+          docker stop demo-gallery 2>/dev/null || echo "No container named demo-gallery"
+          docker rm -f demo-gallery 2>/dev/null || echo "No container to remove"
+
+          # Stop any container using port 8080 (regardless of name)
+          echo "Checking for containers using port 8080..."
+          PORT_8080_CONTAINER=$(docker ps --filter "publish=8080" --format "{{.Names}}" | head -1)
+          if [ -n "$PORT_8080_CONTAINER" ]; then
+            echo "⚠️  Found container using port 8080: $PORT_8080_CONTAINER"
+            echo "Stopping it to free the port..."
+            docker stop "$PORT_8080_CONTAINER"
+            docker rm -f "$PORT_8080_CONTAINER"
+            echo "✅ Port 8080 freed"
+          else
+            echo "✅ Port 8080 is available"
+          fi
 
           # Clean up old images to save space
           echo "Cleaning up old images..."
