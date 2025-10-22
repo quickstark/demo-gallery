@@ -32,7 +32,6 @@ services:
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${HOME}/.docker:/root/.docker:ro
       - /docker/appdata/quickstarkdemo-runner/work:/tmp/runner/work
       - /docker/appdata/quickstarkdemo-runner/tools:/opt/hostedtoolcache
       - /docker/appdata/quickstarkdemo-runner/npm-cache:/root/.npm

@@ -363,22 +363,75 @@ jobs:
           echo "Setting up Datadog CI tools"
           echo "=========================================="
 
+          # Function to try installation with or without sudo
+          try_install() {
+            local cmd="$1"
+            if sudo -n true 2>/dev/null; then
+              sudo $cmd
+            else
+              $cmd
+            fi
+          }
+
           # Check if Node.js is installed
           if ! command -v node &> /dev/null; then
             echo "📦 Installing Node.js..."
-            sudo apt-get update -qq
-            sudo apt-get install -y nodejs npm
-            echo "✓ Node.js installed: $(node --version)"
-            echo "✓ npm installed: $(npm --version)"
+
+            # Try different package managers
+            if command -v apt-get &> /dev/null; then
+              echo "Using apt-get..."
+              try_install "apt-get update -qq"
+              try_install "apt-get install -y nodejs npm"
+            elif command -v apk &> /dev/null; then
+              echo "Using apk..."
+              try_install "apk add --no-cache nodejs npm"
+            elif command -v yum &> /dev/null; then
+              echo "Using yum..."
+              try_install "yum install -y nodejs npm"
+            else
+              echo "❌ No package manager found (apt-get/apk/yum)"
+              echo "⚠️  Skipping datadog-ci installation"
+              exit 0
+            fi
+
+            # Verify installation
+            if command -v node &> /dev/null; then
+              echo "✓ Node.js installed: $(node --version)"
+              echo "✓ npm installed: $(npm --version)"
+            else
+              echo "❌ Node.js installation failed"
+              exit 0
+            fi
           else
             echo "✓ Node.js already available: $(node --version)"
+            echo "✓ npm already available: $(npm --version)"
           fi
 
           # Check if datadog-ci is installed
           if ! command -v datadog-ci &> /dev/null; then
             echo "📦 Installing datadog-ci..."
-            sudo npm install -g @datadog/datadog-ci
-            echo "✓ datadog-ci installed: $(datadog-ci version)"
+
+            # Try to install globally
+            if try_install "npm install -g @datadog/datadog-ci"; then
+              echo "✓ datadog-ci installed globally"
+            else
+              echo "⚠️  Global install failed, trying without sudo..."
+              npm install -g @datadog/datadog-ci 2>/dev/null || {
+                echo "❌ datadog-ci installation failed"
+                echo "⚠️  Deployment marking will be skipped"
+                exit 0
+              }
+            fi
+
+            # Verify installation
+            if command -v datadog-ci &> /dev/null; then
+              echo "✓ datadog-ci installed: $(datadog-ci version)"
+            else
+              echo "❌ datadog-ci not found in PATH after installation"
+              echo "Checking possible locations..."
+              find /usr -name "datadog-ci" 2>/dev/null || echo "Not found in /usr"
+              exit 0
+            fi
           else
             echo "✓ datadog-ci already available: $(datadog-ci version)"
           fi
