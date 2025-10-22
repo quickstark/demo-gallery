@@ -1,6 +1,55 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import path from 'path'
+import { execSync } from 'child_process';
+import fs from 'fs';
+
+/**
+ * Vite plugin to automatically inject version from VERSION file + git commit SHA
+ * This ensures a single source of truth for versioning across all environments
+ */
+function versionInjectionPlugin() {
+  return {
+    name: 'version-injection',
+    config: () => {
+      let version = 'unknown';
+      let gitSha = 'local';
+      let release = 'unknown-local';
+
+      try {
+        // Read VERSION file (single source of truth)
+        const versionFile = path.join(process.cwd(), 'VERSION');
+        if (fs.existsSync(versionFile)) {
+          version = fs.readFileSync(versionFile, 'utf-8').trim();
+        } else {
+          console.warn('⚠️  VERSION file not found, using "unknown"');
+        }
+
+        // Get git commit SHA (for uniqueness)
+        try {
+          gitSha = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
+        } catch (err) {
+          console.warn('⚠️  Git not available, using "local" for commit SHA');
+          gitSha = 'local';
+        }
+
+        // Create release version (VERSION-SHA format, matching deploy workflow)
+        release = `${version}-${gitSha}`;
+
+        console.log(`📦 Version injection: ${release} (from VERSION file + git)`);
+      } catch (err) {
+        console.error('❌ Error reading version:', err.message);
+      }
+
+      return {
+        define: {
+          // Inject VITE_RELEASE at build time
+          'import.meta.env.VITE_RELEASE': JSON.stringify(release),
+        }
+      };
+    }
+  };
+}
 
 // https://vitejs.dev/config/
 export default defineConfig(({ command, mode }) => {
@@ -47,6 +96,7 @@ export default defineConfig(({ command, mode }) => {
       },
     },
     plugins: [
+      versionInjectionPlugin(), // Inject version from VERSION file + git SHA
       react({
         jsxRuntime: 'automatic'
       }),

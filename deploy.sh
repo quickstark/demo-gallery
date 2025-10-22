@@ -1,7 +1,18 @@
 #!/bin/bash
 
-# Deployment script for demo-gallery React application
-# This script can be run directly on the server for manual deployments
+# =============================================================================
+# Manual Deployment Script for React Gallery
+# =============================================================================
+# This script is for MANUAL/BACKUP deployments only
+#
+# PRIMARY DEPLOYMENT METHOD: GitHub Actions (see .github/workflows/deploy.yml)
+# USE THIS SCRIPT ONLY FOR:
+#   - Manual deployments without GitHub Actions
+#   - Emergency rollbacks
+#   - Local testing of deployment process
+#
+# For normal deployments, use: ./scripts/deploy-github.sh
+# =============================================================================
 
 set -e
 

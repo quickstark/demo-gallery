@@ -163,18 +163,14 @@ export VITE_DATADOG_CLIENT_TOKEN="your-dd-token"
 
 ### CI/CD Deployment
 
-The project includes CircleCI configuration for automated deployments:
+The project uses GitHub Actions for automated deployments:
 
-1. **Build**: Builds Docker image on every commit
-2. **Push**: Pushes to Docker Hub with version tags
-3. **Deploy**: Automatically deploys to configured servers
+1. **Build**: Builds Docker image on push to main
+2. **Push**: Pushes to Docker Hub with version tags (latest, VERSION-SHA, SHA)
+3. **Deploy**: Automatically deploys to Ubuntu server
+4. **Tag**: Creates Git tags and GitHub Releases on VERSION file changes
 
-#### Required CircleCI Contexts
-
-- `docker-hub`: Docker Hub credentials
-- `tailscale`: Tailscale OAuth credentials
-- `deployment`: SSH keys and server config
-- `app-config`: Runtime environment variables
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for complete deployment documentation.
 
 ### Building for Production
 

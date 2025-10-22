@@ -116,6 +116,240 @@ SONAR_HOST_URL: https://your-sonarqube-instance.com
 
 ---
 
+## Version Management
+
+The React Gallery uses **centralized version management** with the `VERSION` file as the single source of truth. Version information is automatically injected across all environments with commit SHA appended for uniqueness.
+
+> **📖 Detailed Documentation**: See [VERSION_MANAGEMENT.md](./VERSION_MANAGEMENT.md) for complete version management details, troubleshooting, and best practices.
+
+### VERSION File - Single Source of Truth
+
+The `VERSION` file at the project root is the **only place** where version is defined:
+
+```
+1.0.0
+```
+
+**Version Format**: `MAJOR.MINOR.PATCH` (or `MAJOR.MINOR.PATCH-prerelease`)
+- **MAJOR**: Breaking changes
+- **MINOR**: New features (backward compatible)
+- **PATCH**: Bug fixes (backward compatible)
+- **Prerelease**: Optional suffix (e.g., `1.0.0-beta.1`, `2.0.0-rc.1`)
+
+**Automatic Injection**:
+- **Local Development**: Vite plugin reads VERSION + git SHA → `VITE_RELEASE="1.0.0-abc1234"`
+- **Production**: GitHub Actions reads VERSION + commit SHA → `VITE_RELEASE="1.0.0-def5678"`
+- **No manual configuration needed** - version is automatically managed everywhere
+
+**Format with Commit SHA**: `VERSION-SHA` (e.g., `1.0.0-abc1234`)
+- Ensures unique release tracking even if VERSION not incremented
+- Provides exact traceability to source code commit
+- Prevents accidental Docker image overwrites
+
+### Automated Tagging Workflow
+
+When you update the VERSION file and push to main, the version-tagging workflow automatically:
+
+1. ✅ Validates semantic version format
+2. 🏷️ Creates Git tag (e.g., `v1.0.0`)
+3. 📝 Generates release notes from commits
+4. 🚀 Creates GitHub Release
+5. 🔗 Links to Docker images
+
+### How to Release a New Version
+
+#### Step 1: Update VERSION File
+
+```bash
+# For a new feature (minor version bump)
+echo "1.1.0" > VERSION
+
+# For a bug fix (patch version bump)
+echo "1.0.1" > VERSION
+
+# For breaking changes (major version bump)
+echo "2.0.0" > VERSION
+
+# For a prerelease
+echo "1.1.0-beta.1" > VERSION
+```
+
+#### Step 2: Commit and Push
+
+```bash
+git add VERSION
+git commit -m "chore: Bump version to 1.1.0"
+git push origin main
+```
+
+#### Step 3: Automatic Processing
+
+Two workflows trigger simultaneously:
+
+1. **version-tagging.yml**: Creates tag and GitHub Release
+2. **deploy.yml**: Builds Docker image and deploys
+
+**Result**:
+- Git tag: `v1.1.0`
+- GitHub Release: https://github.com/YOUR_USERNAME/demo-gallery/releases/tag/v1.1.0
+- Docker images:
+  - `latest`
+  - `1.1.0-abc1234` (version + commit SHA)
+  - `abc1234` (commit SHA only)
+- Deployed to server on port 8080
+
+### Version Tagging Details
+
+**What Gets Created**:
+- **Git Tag**: Annotated tag `v{VERSION}` (e.g., `v1.0.0`)
+- **GitHub Release**: With automatically generated release notes
+- **Release Notes Include**:
+  - Changes since previous tag
+  - Commit history with links
+  - Docker image tags
+  - Deployment workflow link
+
+**Duplicate Prevention**:
+- Workflow checks if tag already exists
+- Skips gracefully if version already tagged
+- Prevents accidental duplicate releases
+
+**Validation**:
+- VERSION file must exist and not be empty
+- Must match semantic version format: `MAJOR.MINOR.PATCH`
+- Invalid formats are rejected with clear error messages
+
+### Version Strategy Examples
+
+#### Feature Development
+```bash
+# Initial release
+echo "1.0.0" > VERSION
+git add VERSION && git commit -m "chore: Initial release v1.0.0"
+git push origin main
+
+# Add new feature
+echo "1.1.0" > VERSION
+git add VERSION && git commit -m "chore: Release v1.1.0 - Add user profiles"
+git push origin main
+
+# Add another feature
+echo "1.2.0" > VERSION
+git add VERSION && git commit -m "chore: Release v1.2.0 - Add search functionality"
+git push origin main
+```
+
+#### Bug Fixes
+```bash
+# Fix critical bug
+echo "1.2.1" > VERSION
+git add VERSION && git commit -m "chore: Release v1.2.1 - Fix upload error"
+git push origin main
+
+# Another fix
+echo "1.2.2" > VERSION
+git add VERSION && git commit -m "chore: Release v1.2.2 - Fix navigation issue"
+git push origin main
+```
+
+#### Breaking Changes
+```bash
+# Major redesign
+echo "2.0.0" > VERSION
+git add VERSION && git commit -m "chore: Release v2.0.0 - Major UI redesign"
+git push origin main
+```
+
+#### Prerelease Testing
+```bash
+# Beta testing
+echo "1.3.0-beta.1" > VERSION
+git add VERSION && git commit -m "chore: Release v1.3.0-beta.1 for testing"
+git push origin main
+
+# After testing, official release
+echo "1.3.0" > VERSION
+git add VERSION && git commit -m "chore: Release v1.3.0"
+git push origin main
+```
+
+### Viewing Releases
+
+**GitHub UI**:
+- Navigate to: https://github.com/YOUR_USERNAME/demo-gallery/releases
+- View all releases, tags, and release notes
+
+**GitHub CLI**:
+```bash
+# List all releases
+gh release list
+
+# View specific release
+gh release view v1.0.0
+
+# Download release assets (if any)
+gh release download v1.0.0
+```
+
+**Git Tags**:
+```bash
+# List all tags
+git tag
+
+# Show tag details
+git show v1.0.0
+
+# Checkout specific version
+git checkout v1.0.0
+```
+
+### Docker Image Versioning
+
+Each deployment creates three image tags:
+
+1. **`latest`**: Always points to most recent build
+   ```bash
+   docker pull your-username/demo-gallery:latest
+   ```
+
+2. **`VERSION-SHA`**: Specific version + commit (e.g., `1.0.0-abc1234`)
+   ```bash
+   docker pull your-username/demo-gallery:1.0.0-abc1234
+   ```
+
+3. **`SHA`**: Commit SHA only (e.g., `abc1234`)
+   ```bash
+   docker pull your-username/demo-gallery:abc1234
+   ```
+
+**Why Multiple Tags?**
+- `latest`: Quick access to newest version
+- `VERSION-SHA`: Traceability between release and exact commit
+- `SHA`: Direct deployment of specific commit
+
+### Rollback to Previous Version
+
+If you need to rollback to a previous release:
+
+```bash
+# Option 1: Revert VERSION file
+git revert HEAD  # Reverts the version bump commit
+git push origin main  # Triggers new deployment with old version
+
+# Option 2: Deploy specific Docker image
+ssh your-server
+docker pull your-username/demo-gallery:1.0.0-abc1234
+docker stop demo-gallery && docker rm demo-gallery
+docker run -d \
+  --name demo-gallery \
+  --restart unless-stopped \
+  -p 8080:80 \
+  --env-file .env \
+  your-username/demo-gallery:1.0.0-abc1234
+```
+
+---
+
 ## Deployment Methods
 
 ### Method 1: Automated Script (Recommended)
@@ -324,24 +558,37 @@ Trigger manually from GitHub Actions UI:
 
 ### Versioning Strategy
 
-**VERSION File**: Base semantic version (e.g., `1.0.0`)
+The React Gallery uses a dual-versioning approach:
 
-**Git SHA Tagging**: Automatic append of short commit SHA
-- Version file: `1.0.0`
-- Git commit: `abc1234567...`
-- Final version: `1.0.0-abc1234`
+**1. Semantic Versioning (Git Tags and GitHub Releases)**:
+- Controlled by the `VERSION` file
+- Creates clean release markers (e.g., `v1.0.0`)
+- See [Version Management](#version-management) section for details
 
-**Updating Version**:
+**2. Deployment Versioning (Docker Images)**:
+- Combines semantic version + git SHA
+- Format: `VERSION-SHA` (e.g., `1.0.0-abc1234`)
+- Provides exact traceability to source code commit
+
+**Quick Version Update**:
 
 ```bash
 # Update VERSION file for new release
 echo "1.1.0" > VERSION
 
-# Commit version bump
+# Commit and push
 git add VERSION
 git commit -m "chore: Bump version to 1.1.0"
 git push origin main
+
+# Result: Creates v1.1.0 tag, GitHub Release, and deploys 1.1.0-abc1234
 ```
+
+**Version Components**:
+- **VERSION file**: `1.0.0` (semantic version)
+- **Git tag**: `v1.0.0` (automatically created)
+- **Docker image**: `1.0.0-abc1234` (version + commit SHA for deployment)
+- **GitHub Release**: `Release v1.0.0` (with release notes)
 
 ---
 
