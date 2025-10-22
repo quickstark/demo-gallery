@@ -21,7 +21,7 @@
 
 ## 🎯 Overview
 
-Demo Gallery is a production-ready React application that showcases modern web development practices with comprehensive observability, automated deployment, and professional development workflows.
+Demo Gallery is a React demo application that showcases modern web development practices with comprehensive observability, automated deployment, and professional development workflows.
 
 **Built With:**
 - **Frontend**: React 18 + Vite 6 + Chakra UI 3
