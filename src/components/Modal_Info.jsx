@@ -1,14 +1,15 @@
-import { ChatIcon, DeleteIcon, WarningIcon } from "@chakra-ui/icons";
+import { FiMessageCircle, FiTrash2, FiAlertTriangle } from "react-icons/fi";
 import {
   Link,
-  Modal,
+  Dialog,
   Button,
-  ModalBody,
-  ModalCloseButton,
-  ModalContent,
-  ModalFooter,
-  ModalHeader,
-  ModalOverlay,
+  DialogBody,
+  DialogCloseTrigger,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogBackdrop,
+  DialogRoot,
   Text,
   VStack,
 } from "@chakra-ui/react";
@@ -17,12 +18,12 @@ import React from "react";
 
 export default function Modal_Info({ isOpen, onOpen, onClose }) {
   return (
-    <Modal isOpen={isOpen} onClose={onClose}>
-      <ModalOverlay />
-      <ModalContent>
-        <ModalHeader>What is this supposed to be anyway?</ModalHeader>
-        <ModalCloseButton />
-        <ModalBody>
+    <DialogRoot open={isOpen} onOpenChange={({ open }) => !open && onClose()}>
+      <DialogBackdrop />
+      <DialogContent>
+        <DialogHeader>What is this supposed to be anyway?</DialogHeader>
+        <DialogCloseTrigger />
+        <DialogBody>
           <Text fontSize="lg">
             This site was built using<br></br>
             <Link href="https://github.com/" isExternal>
@@ -58,29 +59,29 @@ export default function Modal_Info({ isOpen, onOpen, onClose }) {
             </Text>
             <Text>3. Then try clicking a button</Text>
             <Text>
-              <WarningIcon></WarningIcon>
+              <FiAlertTriangle style={{display: 'inline'}} />
               {" - "}
               button to send an Error with your Image Name and Labels.
             </Text>
             <Text>
-              <ChatIcon></ChatIcon>
+              <FiMessageCircle style={{display: 'inline'}} />
               {" - "}
               button to trap an Unhandled Error with Feedback.
             </Text>
             <Text>
-              <DeleteIcon></DeleteIcon>
+              <FiTrash2 style={{display: 'inline'}} />
               {" - "}
               button to delete a picture.
             </Text>
           </VStack>
-        </ModalBody>
+        </DialogBody>
 
-        <ModalFooter>
+        <DialogFooter>
           <Button colorScheme="yellow" mr={3} onClick={onClose}>
             Close
           </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+        </DialogFooter>
+      </DialogContent>
+    </DialogRoot>
   );
 }

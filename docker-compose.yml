@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  demo-gallery:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: demo-gallery
+    ports:
+      - "3001:80"
+    environment:
+      # API Configuration
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+      - VITE_API_KEY=${VITE_API_KEY:-}
+
+      # Authentication (if needed)
+      - VITE_AUTH_USERNAME=${VITE_AUTH_USERNAME:-}
+      - VITE_AUTH_PASSWORD=${VITE_AUTH_PASSWORD:-}
+
+      # Environment
+      - VITE_ENVIRONMENT=${VITE_ENVIRONMENT:-development}
+
+      # Datadog Configuration
+      - VITE_DATADOG_APPLICATION_ID=${VITE_DATADOG_APPLICATION_ID:-}
+      - VITE_DATADOG_CLIENT_TOKEN=${VITE_DATADOG_CLIENT_TOKEN:-}
+      - VITE_DATADOG_SITE=${VITE_DATADOG_SITE:-datadoghq.com}
+      - VITE_DATADOG_SERVICE=${VITE_DATADOG_SERVICE:-demo-gallery}
+      - VITE_RELEASE=${VITE_RELEASE:-1.0.0}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+    networks:
+      - demo-gallery-network
+    labels:
+      - "com.docker.compose.project=demo-gallery"
+      - "com.demo-gallery.description=React Gallery Application"
+
+networks:
+  demo-gallery-network:
+    driver: bridge

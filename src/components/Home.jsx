@@ -1,10 +1,13 @@
 import {
-  ArrowUpIcon,
-  ChatIcon,
-  DeleteIcon,
-  WarningIcon,
-} from "@chakra-ui/icons";
+  FiUpload,
+  FiMessageCircle,
+  FiTrash2,
+  FiAlertTriangle,
+  FiChevronDown,
+  FiChevronUp,
+} from "react-icons/fi";
 import {
+  Box,
   Button,
   Center,
   Heading,
@@ -13,32 +16,70 @@ import {
   Input,
   InputGroup,
   Link,
-  Radio,
-  RadioGroup,
   SimpleGrid,
   Stack,
   Text,
   VStack,
-  useToast,
+  useMediaQuery,
+  FileUpload,
+  Tag,
+  Wrap,
+  WrapItem,
+  Collapsible,
 } from "@chakra-ui/react";
 import "react-medium-image-zoom/dist/styles.css";
 import { datadogRum } from '@datadog/browser-rum';
 
-import { useMediaQuery } from "@chakra-ui/react";
-
 import { useEffect, useRef, useState } from "react";
 
 import axios from "axios";
+import apiClient from "../utils/apiClient";
 import React from "react";
 
 import { useEnvContext } from "./Context";
+import { useAppToaster } from "../hooks/useAppToaster";
 
 const api_base_url = import.meta.env.VITE_API_URL;
 
-// Change
+/**
+ * Generates a random policy value for Datadog RUM testing and demo purposes
+ * @returns {string} Random policy from predefined list (standard|premium|enterprise|basic|trial)
+ */
+const generateRandomPolicy = () => {
+  const policies = ['standard', 'premium', 'enterprise', 'basic', 'trial'];
+  return policies[Math.floor(Math.random() * policies.length)];
+};
+
+/**
+ * Sends a custom action to Datadog RUM with policy attributes for monitoring
+ * @param {string} actionName - Name of the action being tracked
+ * @param {Object} additionalAttributes - Additional attributes to include in the action
+ * @returns {string} The generated policy value used for this action
+ */
+const sendCustomAction = (actionName, additionalAttributes = {}) => {
+  const policyValue = generateRandomPolicy();
+  
+  // Send custom action to Datadog RUM
+  datadogRum.addAction(actionName, {
+    policy: policyValue,
+    ...additionalAttributes
+  });
+  
+  console.log(`Custom action "${actionName}" sent with policy: ${policyValue}`);
+  return policyValue;
+};
+
+/**
+ * Custom error class for validation errors with Datadog RUM integration
+ * Automatically logs errors to Datadog when instantiated
+ */
 class ValidationError extends Error {
+  /**
+   * Create a validation error with Datadog logging
+   * @param {string} message - Error message to display and log
+   */
   constructor(message) {
-    super(message); // (1)
+    super(message);
     this.name = `ERROR on - "${message}" `;
 
     // Create an instance of the error
@@ -62,22 +103,43 @@ const onUnhandledError = async (message) => {
   }
 };
 
+/**
+ * Home component - Main image gallery interface
+ * 
+ * Provides functionality for:
+ * - Image upload with drag & drop support
+ * - Image display in responsive grid layout
+ * - Backend switching (MongoDB/PostgreSQL)
+ * - Error generation for monitoring demos
+ * - Comprehensive Datadog RUM integration
+ * - Smart fallback to mock data when API unavailable
+ * 
+ * @component
+ * @returns {JSX.Element} The main gallery interface
+ */
 export default function Home() {
   const [activeBackend, setActiveBackend] = useEnvContext();
   const [allImages, setAllImages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedFile, setSelectedFile] = useState(null);
+  const [isLoadingImages, setIsLoadingImages] = useState(false);
+  const [deletingImageId, setDeletingImageId] = useState(null);
+  const [selectedFiles, setSelectedFiles] = useState([]);
   const [isSelected, setIsSelected] = useState(false);
   const [isUploadSuccessful, setIsUploadSuccessful] = useState(false);
   const [isDeleteSuccessful, setIsDeleteSuccessful] = useState(false);
   const [isLargerThan1200] = useMediaQuery("(min-width: 1200px)");
+  const [expandedDropdowns, setExpandedDropdowns] = useState({});
+  const [fileUploadKey, setFileUploadKey] = useState(0); // Key to force FileUpload reset
   const fileUploadRef = useRef(null);
-  const errorTextRef = useRef(null);
-  const toast = useToast();
+  const toaster = useAppToaster();
 
   const cols = isLargerThan1200 ? 4 : 1;
 
-  // function to convert string to mixed case
+  /**
+   * Converts a string to mixed case (title case)
+   * @param {string} str - The string to convert
+   * @returns {string} String with first letter of each word capitalized
+   */
   const toMixedCase = (str) => {
     return str
       .toLowerCase()
@@ -87,17 +149,52 @@ export default function Home() {
   };
 
   const getImages = async () => {
-    const res = await axios({
-      method: "get",
-      // mode: "cors",
-      withCredentials: false,
-      url: `${api_base_url}/images`,
-      params: { backend: activeBackend },
-    });
-    const data = await res.data;
-    return data;
+    try {
+      const res = await apiClient({
+        method: "get",
+        url: `/images`,
+        params: { backend: activeBackend },
+      });
+      const data = await res.data;
+      return data;
+    } catch (error) {
+      // Smart fallback handling - use mock data when API is unavailable
+      const isDevelopment = import.meta.env.VITE_ENVIRONMENT === 'dev';
+      const isNetworkError = error.code === 'ERR_NETWORK' || 
+                           error.code === 'ERR_NAME_NOT_RESOLVED' ||
+                           error.code === 'ECONNREFUSED' ||
+                           error.message?.includes('CORS');
+      
+      if (isDevelopment && isNetworkError) {
+        console.log('🧪 API unavailable in development, using mock data');
+        return [
+          {
+            id: 'mock-1',
+            name: 'sample-image-1.jpg',
+            url: '/qs.png',
+            ai_labels: ['demo', 'sample', 'test'],
+            ai_text: ['Sample', 'Image']
+          },
+          {
+            id: 'mock-2', 
+            name: 'sample-image-2.jpg',
+            url: '/qs.png',
+            ai_labels: ['gallery', 'example', 'mock'],
+            ai_text: ['Gallery', 'Demo']
+          }
+        ];
+      }
+      // Re-throw error for production or non-network errors
+      throw error;
+    }
   };
 
+  /**
+   * Posts an image to the API with form data
+   * @param {string} url - The API endpoint URL
+   * @param {FormData} formdata - Form data containing the image file
+   * @returns {Promise<Object>} Axios response object
+   */
   const postImage = async (url, formdata) => {
     const res = await axios({
       method: "post",
@@ -109,6 +206,11 @@ export default function Home() {
     return res;
   };
 
+  /**
+   * Deletes an image from the API by ID
+   * @param {string|number} id - The image ID to delete
+   * @returns {Promise<Object>} Axios response object
+   */
   const delImage = async (id) => {
     const res = await axios({
       method: "delete",
@@ -118,87 +220,245 @@ export default function Home() {
     return res;
   };
 
-  // Function to calculate upload progress, but Axios lacks fidelity to do this properly
-  // const onUploadProgress = (e) => {
-  //   const percentage = Math.round((100 * e.loaded) / e.total);
-  //   setUploadProgress(percentage);
-  //   console.log(`Upload % = ${percentage}`);
-  // };
+  /**
+   * Handles file selection with enhanced validation and user feedback
+   * Works with both traditional file inputs and Chakra UI FileUpload
+   * Always REPLACES previous selection (does not accumulate)
+   * @param {Object} details - File selection details from Chakra UI FileUpload
+   */
+  const handleFileSelection = (details) => {
+    const files = details?.acceptedFiles || details?.files || [];
+    console.log('handleFileSelection called with:', files.length, 'files');
 
-  const onInputChange = (e) => {
-    setIsSelected(true);
-    setSelectedFile(e.target.files[0]);
+    // Always start fresh - clear any previous selections
+    if (!files || files.length === 0) {
+      setIsSelected(false);
+      setSelectedFiles([]);
+      return;
+    }
+
+    // Validate file count (max 10)
+    if (files.length > 10) {
+      toaster.create({
+        title: "Too Many Files",
+        description: "Please select up to 10 images at a time.",
+        status: "warning",
+        duration: 4000,
+      });
+      // Reset to empty on validation failure
+      setIsSelected(false);
+      setSelectedFiles([]);
+      return;
+    }
+
+    // Validate file types (images only)
+    const invalidFiles = files.filter(file => !file.type.startsWith('image/'));
+    if (invalidFiles.length > 0) {
+      toaster.create({
+        title: "Invalid File Type",
+        description: `${invalidFiles.length} file(s) are not images and will be ignored.`,
+        status: "warning",
+        duration: 4000,
+      });
+    }
+
+    const validFiles = files.filter(file => file.type.startsWith('image/'));
+
+    // REPLACE (not accumulate) the selected files
+    if (validFiles.length > 0) {
+      setIsSelected(true);
+      setSelectedFiles(validFiles); // This replaces the entire array
+      console.log('Replaced with valid files:', validFiles.length);
+
+      // User feedback for successful selection
+      toaster.create({
+        title: "Files Selected",
+        description: `${validFiles.length} image(s) ready for upload.`,
+        status: "success",
+        duration: 2000,
+      });
+    } else {
+      // No valid files, reset everything
+      setIsSelected(false);
+      setSelectedFiles([]);
+    }
   };
 
-  const onErrorGen = async (e) => {
-    for (let i = 0; i < 100; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      try {
-        toast({
-          title: "Error Sent",
-          description: `Trapping your ERROR - ${i}`,
-          position: "top",
-          status: "success",
-          duration: 1500,
-          isClosable: true,
-        });
-        throw new ValidationError(`${errorTextRef.current.value} - ${i}`);
-      } catch (error) {
-        console.log(`Error: ${error}`);
-      }
-    }
+  /**
+   * Legacy file input handler for backward compatibility
+   * @param {Event} e - File input change event
+   */
+  const handleFileInputChange = (e) => {
+    const files = e.target.files;
+    handleFileSelection({ files: Array.from(files || []) });
   };
 
   const onFileUpload = async (e) => {
-    if (fileUploadRef.current.value == "") {
-      toast({
-        title: `Select an Image`,
-        description: `Please select an image to upload`,
-        position: "top",
+    if (selectedFiles.length === 0) {
+      toaster.create({
+        title: `Select Images`,
+        description: `Please select one or more images to upload`,
         status: "error",
         duration: 4000,
-        isClosable: true,
       });
-    } else {
-      setIsLoading(true);
-      const formdata = new FormData();
-      formdata.append("file", selectedFile, selectedFile.name);
-      const res = await postImage(`${api_base_url}/add_image`, formdata);
-      if (res.data?.message.includes("questionable")) {
-        toast({
-          title: `Questionable Content`,
-          description: `${res.data.message}`,
-          position: "top",
-          status: "error",
-          duration: 4000,
-          isClosable: true,
-        });
-      } else {
-        setIsUploadSuccessful(!isUploadSuccessful);
-        console.log(`Amazon Response: ${JSON.stringify(res)}`);
-        console.log(`File Uploaded: ${isUploadSuccessful}`);
-      }
+      return;
     }
-    setIsLoading(false);
+
+    setIsLoading(true);
+    const uploadResults = [];
+    
+    try {
+      for (const file of selectedFiles) {
+        const formdata = new FormData();
+        formdata.append("file", file, file.name);
+        
+        // Send custom action before upload
+        const policyValue = sendCustomAction('image_upload_started', {
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type,
+          totalFiles: selectedFiles.length
+        });
+        
+        try {
+          const res = await postImage(`${api_base_url}/add_image`, formdata);
+          
+          // Send another custom action after upload completes
+          sendCustomAction('image_upload_completed', {
+            fileName: file.name,
+            status: res.status,
+            backend: activeBackend
+          });
+          
+          if (res.data?.message.includes("questionable")) {
+            uploadResults.push({ file: file.name, status: 'questionable', message: res.data.message });
+          } else {
+            uploadResults.push({ file: file.name, status: 'success', policy: policyValue });
+          }
+        } catch (error) {
+          console.error(`Failed to upload ${file.name}:`, error);
+          uploadResults.push({ file: file.name, status: 'error', error: error.message });
+          
+          // Send error to Datadog
+          datadogRum.addError(error, {
+            context: 'file_upload',
+            fileName: file.name,
+            backend: activeBackend
+          });
+        }
+      }
+      
+      // Show summary toast
+      const successCount = uploadResults.filter(r => r.status === 'success').length;
+      const errorCount = uploadResults.filter(r => r.status === 'error').length;
+      const questionableCount = uploadResults.filter(r => r.status === 'questionable').length;
+      
+      if (successCount > 0) {
+        setIsUploadSuccessful(!isUploadSuccessful);
+        toaster.create({
+          title: `Upload Results`,
+          description: `${successCount} successful, ${errorCount} failed, ${questionableCount} flagged`,
+          status: successCount === selectedFiles.length ? "success" : "warning",
+          duration: 6000,
+        });
+      }
+      
+      // Show individual error messages for questionable content
+      uploadResults.filter(r => r.status === 'questionable').forEach(result => {
+        toaster.create({
+          title: `Questionable Content - ${result.file}`,
+          description: result.message,
+          status: "error",
+          duration: 5000,
+        });
+      });
+      
+    } finally {
+      setIsLoading(false);
+      setSelectedFiles([]);
+      setIsSelected(false);
+      // Increment key to force FileUpload component to reset/remount
+      setFileUploadKey(prev => prev + 1);
+    }
   };
 
   const onFileDelete = async (image) => {
     const id = image.id || image._id?.$oid; // Mongo or Postgres
-    console.log(`Delete: {db: ${activeBackend}, id: ${id}`);
-    const res = await delImage(id);
-    if (res.status == "201") {
-      setIsDeleteSuccessful(!isDeleteSuccessful);
-      console.log(res);
-      toast({
-        title: `Delete Picture`,
-        description: `We deleted ${image.name} from ${toMixedCase(
-          activeBackend
-        )}`,
-        position: "top",
-        status: "error",
-        duration: 5000,
-        isClosable: true,
+    console.log(`Delete: {db: ${activeBackend}, id: ${id}}`);
+    
+    // Send custom action before delete
+    const policyValue = sendCustomAction('image_delete_started', {
+      imageId: id,
+      imageName: image.name,
+      backend: activeBackend
+    });
+    
+    // Set loading state for this specific image
+    setDeletingImageId(id);
+    
+    try {
+      const res = await delImage(id);
+      
+      // Send success custom action after delete completes
+      sendCustomAction('image_delete_completed', {
+        imageId: id,
+        status: res.status,
+        backend: activeBackend,
+        success: true
       });
+      
+      // Fix: Check correct status codes for DELETE operations (200, 201, 204)
+      if (res.status === 200 || res.status === 201 || res.status === 204) {
+        setIsDeleteSuccessful(!isDeleteSuccessful);
+        console.log('Delete successful:', res);
+        
+        // Show success notification
+        toaster.create({
+          title: `Delete Successful`,
+          description: `Successfully deleted ${image.name} from ${toMixedCase(
+            activeBackend
+          )} with policy: ${policyValue}`,
+          status: "success", // Fix: Changed from "error" to "success"
+          duration: 3000,
+        });
+      } else {
+        // Handle unexpected successful status codes
+        console.warn('Unexpected delete response status:', res.status);
+        toaster.create({
+          title: `Delete Warning`,
+          description: `Delete operation completed with unexpected status: ${res.status}`,
+          status: "warning",
+          duration: 4000,
+        });
+      }
+    } catch (error) {
+      console.error('Delete failed:', error);
+      
+      // Send failure custom action for monitoring
+      sendCustomAction('image_delete_failed', {
+        imageId: id,
+        imageName: image.name,
+        backend: activeBackend,
+        error: error.message,
+        status: error.response?.status || 'unknown',
+        success: false
+      });
+      
+      // Show user-friendly error notification
+      const errorMessage = error.response?.data?.message || 
+                           error.response?.statusText || 
+                           error.message || 
+                           'Unknown error occurred';
+      
+      toaster.create({
+        title: `Delete Failed`,
+        description: `Failed to delete ${image.name}: ${errorMessage}`,
+        status: "error",
+        duration: 6000,
+      });
+    } finally {
+      // Always clear delete loading state
+      setDeletingImageId(null);
     }
   };
 
@@ -206,28 +466,85 @@ export default function Home() {
     // Add an attachment
     const name =
       image.name.substring(0, image.name.lastIndexOf(".")) || image.name;
+    
+    // Send custom action before error
+    const policyValue = sendCustomAction('error_generation', {
+      imageName: image.name,
+      imageId: image.id || image._id?.$oid,
+      labels: image.ai_labels,
+      backend: activeBackend
+    });
+    
     await image.ai_labels.map((label, index) => {
     });
-    toast({
+    
+    toaster.create({
       title: "Error Sent",
-      description: `We sent your ERROR on - ${image.name}`,
-      position: "top",
+      description: `We sent your ERROR on - ${image.name} with policy: ${policyValue}`,
       status: "success",
       duration: 5000,
-      isClosable: true,
     });
-    // throw new ValidationError(image.name);
+    
+    // throw the error
     throw new ValidationError(image.name);
   };
 
 
   // Refresh after Upload or Delete
   useEffect(() => {
-    const images = getImages().then((res) => {
-      setAllImages(res);
-      localStorage.setItem("activeBackend", activeBackend);
-      fileUploadRef.current.value = null;
-    });
+    const loadImages = async () => {
+      setIsLoadingImages(true);
+      try {
+        const images = await getImages();
+        setAllImages(images);
+        localStorage.setItem("activeBackend", activeBackend);
+      } catch (error) {
+        console.error('Failed to load images:', error);
+        
+        // Determine error type and provide specific feedback
+        let errorTitle = "Failed to Load Images";
+        let errorDescription = `Could not load images from ${activeBackend}. Please try again.`;
+        
+        if (error.code === 'ERR_NETWORK' || error.code === 'ERR_NAME_NOT_RESOLVED') {
+          errorTitle = "Network Connection Error";
+          errorDescription = `Cannot connect to the API server. Using offline mode with sample data.`;
+        } else if (error.code === 'ECONNREFUSED') {
+          errorTitle = "Backend Server Unavailable";
+          errorDescription = `Backend server is not responding. Using offline mode with sample data.`;
+        } else if (error.message?.includes('CORS')) {
+          errorTitle = "CORS Configuration Issue";
+          errorDescription = `Cross-origin request blocked. Using offline mode with sample data.`;
+        } else if (error.response?.status === 404) {
+          errorTitle = "API Endpoint Not Found";
+          errorDescription = `The images endpoint was not found. Using offline mode with sample data.`;
+        }
+        
+        // Send error to Datadog with enhanced context
+        datadogRum.addError(error, {
+          context: 'image_loading',
+          backend: activeBackend,
+          operation: 'getImages',
+          apiUrl: api_base_url,
+          errorCode: error.code,
+          httpStatus: error.response?.status
+        });
+        
+        // Show enhanced user-friendly error
+        toaster.create({
+          title: errorTitle,
+          description: errorDescription,
+          status: "error",
+          duration: 8000,
+        });
+        
+        // Set empty array as fallback to prevent UI issues
+        setAllImages([]);
+      } finally {
+        setIsLoadingImages(false);
+      }
+    };
+
+    loadImages();
   }, [isUploadSuccessful, isDeleteSuccessful, activeBackend]);
 
   return (
@@ -247,149 +564,395 @@ export default function Home() {
         </Heading>
         <br></br>
         <Center>
-          <InputGroup>
-            <VStack spacing={5}>
-              <Input
-                color="purple.300"
-                ref={fileUploadRef}
-                type="file"
-                onChange={onInputChange}
-                size="lg"
-                maxWidth={400}
-              />
+          <VStack spacing={5}>
+            <FileUpload.Root
+              key={fileUploadKey}
+              multiple
+              accept="image/*"
+              maxFiles={10}
+              onFileAccept={handleFileSelection}
+              maxW="400px"
+            >
+              <FileUpload.HiddenInput />
+              <FileUpload.Trigger asChild>
+                <Button
+                  bg="purple.500"
+                  color="white"
+                  size="lg"
+                  width="100%"
+                  _hover={{ bg: "purple.600" }}
+                  aria-label="Select up to 10 images for upload"
+                >
+                  <FiUpload style={{ marginRight: '8px' }} />
+                  Select Images (Max 10)
+                </Button>
+              </FileUpload.Trigger>
+              
+              <FileUpload.ItemGroup mt={3}>
+                {selectedFiles.map((file, index) => (
+                  <FileUpload.Item key={index} file={file}>
+                    <FileUpload.ItemPreview type="image/*" />
+                    <FileUpload.ItemName />
+                    <FileUpload.ItemSizeText />
+                    <FileUpload.ItemDeleteTrigger asChild>
+                      <IconButton
+                        size="sm"
+                        colorScheme="red"
+                        variant="ghost"
+                        aria-label={`Remove ${file.name}`}
+                      >
+                        <FiTrash2 />
+                      </IconButton>
+                    </FileUpload.ItemDeleteTrigger>
+                  </FileUpload.Item>
+                ))}
+              </FileUpload.ItemGroup>
+            </FileUpload.Root>
+            
 
-              <Button
-                bg="yellow.500"
-                rightIcon={<ArrowUpIcon />}
-                iconSpacing={2}
-                padding={5}
-                size="lg"
-                onClick={onFileUpload}
-                isLoading={isLoading}
-                loadingText="Upload"
-                className="upload_button"
-              >
-                Upload Photo
-              </Button>
-            </VStack>
-          </InputGroup>
+            <Button
+              bg="yellow.500"
+              padding={5}
+              size="lg"
+              onClick={onFileUpload}
+              loading={isLoading}
+              loadingText={`Uploading ${selectedFiles.length} files...`}
+              className="upload_button"
+              disabled={selectedFiles.length === 0}
+              color="black"
+              _hover={{ bg: "yellow.600" }}
+            >
+              Upload {selectedFiles.length > 0 ? `${selectedFiles.length} Photos` : 'Photos'}
+              <FiUpload style={{ marginLeft: '8px' }} />
+            </Button>
+          </VStack>
         </Center>
-        <RadioGroup
-          defaultValue="mongo"
-          padding={5}
-          onChange={setActiveBackend}
-          value={activeBackend}
-        >
-          <Stack spacing={5} direction="row">
-            <Radio colorScheme="green" value="mongo">
-              Mongo
-            </Radio>
-            <Radio colorScheme="orange" value="postgres">
-              Postgres
-            </Radio>
-          </Stack>
-        </RadioGroup>
-        {/* <InputGroup size="lg">
-          <InputLeftAddon children="Error Text"></InputLeftAddon>
-          <Input
-            placeholder="Generated Error"
-            ref={errorTextRef}
-            size="lg"
-            maxWidth={275}
-          />
+        <Stack spacing={4} direction="row" align="center" p={5}>
           <Button
-            bg="red.500"
-            rightIcon={<ArrowUpIcon />}
-            onClick={onErrorGenerator}
-            loadingText="Generate 100 Random Errors"
-            className="error_gen_button"
+            size="md"
+            bg={activeBackend === 'mongo' ? 'purple.500' : 'gray.700'}
+            color="white"
+            border={activeBackend === 'mongo' ? '2px solid' : '2px solid'}
+            borderColor={activeBackend === 'mongo' ? 'purple.400' : 'gray.500'}
+            _hover={{ 
+              bg: activeBackend === 'mongo' ? 'purple.600' : 'gray.600',
+              borderColor: activeBackend === 'mongo' ? 'purple.300' : 'gray.400'
+            }}
+            onClick={() => {
+              console.log('Switching to mongo');
+              setActiveBackend('mongo');
+            }}
           >
-            Generate 100 Errors
+            Mongo
           </Button>
-        </InputGroup> */}
+          <Button
+            size="md"
+            bg={activeBackend === 'postgres' ? 'purple.500' : 'gray.700'}
+            color="white"
+            border={activeBackend === 'postgres' ? '2px solid' : '2px solid'}
+            borderColor={activeBackend === 'postgres' ? 'purple.400' : 'gray.500'}
+            _hover={{ 
+              bg: activeBackend === 'postgres' ? 'purple.600' : 'gray.600',
+              borderColor: activeBackend === 'postgres' ? 'purple.300' : 'gray.400'
+            }}
+            onClick={() => {
+              console.log('Switching to postgres');
+              setActiveBackend('postgres');
+            }}
+          >
+            Postgres
+          </Button>
+        </Stack>
 
         <br></br>
-        <SimpleGrid columns={cols} spacing={8}>
-          {allImages.map((image) => {
-            return (
-              <div className="image_container">
-                <Text
-                  key={image.id}
-                  color="purple.500"
-                  width={300}
-                  noOfLines={1}
-                >
-                  {image.name}
-                </Text>
-                <div className="button_container">
-                  <IconButton
-                    key={`error_button-${image.id}`}
-                    bg="gray.800"
-                    color="yellow.300"
-                    className="error_button"
-                    colorScheme="yellow"
-                    aria-label="Throw Error"
-                    size="md"
-                    onClick={() => onSendError(image)}
-                    icon={<WarningIcon />}
-                  ></IconButton>
-                  <IconButton
-                    key={`feedback_button-${image.id}`}
-                    bg="gray.800"
-                    color="yellow.300"
-                    className="feedback_button"
-                    colorScheme="orange"
-                    aria-label="Send Feedback"
-                    size="md"
-                    onClick={() => onUnhandledError("User Feedback Error")}
-                    icon={<ChatIcon />}
-                  ></IconButton>
-                  <IconButton
-                    key={`delete_button-${image.id}`}
-                    bg="gray.800"
-                    color="red.500"
-                    className="delete_button"
-                    colorScheme="red"
-                    aria-label="Delete Image"
-                    size="md"
-                    onClick={() => onFileDelete(image)}
-                    icon={<DeleteIcon />}
-                  ></IconButton>
+        <SimpleGrid 
+          columns={{ base: 1, md: 2, lg: cols }}
+          gap={{ base: "20px", md: "30px", lg: "40px" }}
+          maxW="1200px"
+          mx="auto"
+          px={{ base: 4, md: 6 }}
+        >
+          {isLoadingImages ? (
+            <Center>
+              <VStack spacing={4}>
+                <Text color="purple.300" fontSize="lg">Loading images...</Text>
+                <div style={{
+                  width: '40px',
+                  height: '40px',
+                  border: '4px solid #E2E8F0',
+                  borderTop: '4px solid #805AD5',
+                  borderRadius: '50%',
+                  animation: 'spin 1s linear infinite'
+                }}>
                 </div>
-                <Image
-                  key={`image-${image.id}`}
-                  borderRadius={15}
-                  boxSize="300px"
-                  src={image.url}
-                  objectFit="cover"
-                ></Image>
-                <Text
-                  key={`label-${image.id}`}
-                  className="label_container"
-                  width={300}
+              </VStack>
+            </Center>
+          ) : allImages.length === 0 ? (
+            <Center>
+              <Text color="gray.500" fontSize="lg">No images found in {activeBackend}</Text>
+            </Center>
+          ) : (
+            allImages.map((image) => {
+              // Create a consistent unique key
+              const uniqueKey = image.id || image._id?.$oid || `${image.name}-${image.url}`;
+              const isDropdownOpen = expandedDropdowns[uniqueKey] || false;
+              
+              const toggleDropdown = () => {
+                setExpandedDropdowns(prev => ({ ...prev, [uniqueKey]: !prev[uniqueKey] }));
+              };
+              
+              return (
+                <Box 
+                  key={uniqueKey} 
+                  className="image_container elevated-card" 
+                  maxW="300px" 
+                  position="relative"
+                  borderRadius="xl"
+                  overflow="hidden"
+                  bg="gray.800"
+                  cursor="pointer"
+                  onClick={toggleDropdown}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`View AI details for ${image.name}`}
+                  aria-expanded={isDropdownOpen}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toggleDropdown();
+                    }
+                  }}
+                  _focus={{
+                    outline: "2px solid",
+                    outlineColor: "purple.400",
+                    outlineOffset: "2px"
+                  }}
                 >
-                  {" "}
-                  <span className="ai_text">
-                    {" "}
-                    Text Detected:{" "}
-                    {image.ai_text?.length > 0
-                      ? image.ai_text.slice(0, 10).join(",  ")
-                      : "No Text Detected"}{" "}
-                  </span>
-                  <br></br>
-                  <span className="ai_label">
-                    Tags:{" "}
-                    {image.ai_labels?.length > 0
-                      ? image.ai_labels?.slice(0, 10).join(",  ")
-                      : "No Labels Detected"}{" "}
-                  </span>
-                </Text>
-                {/* {image.ai_labels.map((label) => {
-                      return <Text className="image_ai_labels">{label}</Text>;
-                    })} */}
-              </div>
-            );
-          })}
+                  <Box position="relative" display="inline-block">
+                    <Box
+                      position="absolute"
+                      top="10px"
+                      left="10px"
+                      zIndex={10}
+                      display="flex"
+                      flexDirection="column"
+                      gap="8px"
+                    >
+                    <IconButton
+                      key={`error_button-${uniqueKey}`}
+                      bg="gray.800"
+                      color="yellow.300"
+                      className="error_button"
+                      colorScheme="yellow"
+                      aria-label="Throw Error"
+                      size="md"
+                      onClick={() => onSendError(image)}
+                    >
+                      <FiAlertTriangle />
+                    </IconButton>
+                    <IconButton
+                      key={`feedback_button-${uniqueKey}`}
+                      bg="gray.800"
+                      color="yellow.300"
+                      className="feedback_button"
+                      colorScheme="orange"
+                      aria-label="Send Feedback"
+                      size="md"
+                      onClick={() => onUnhandledError("User Feedback Error")}
+                    >
+                      <FiMessageCircle />
+                    </IconButton>
+                    <IconButton
+                      key={`delete_button-${uniqueKey}`}
+                      bg="gray.800"
+                      color="red.500"
+                      className="delete_button"
+                      colorScheme="red"
+                      aria-label="Delete Image"
+                      size="md"
+                      loading={deletingImageId === (image.id || image._id?.$oid)}
+                      onClick={() => onFileDelete(image)}
+                    >
+                      <FiTrash2 />
+                    </IconButton>
+                    </Box>
+                  <Image
+                    key={`image-${uniqueKey}`}
+                    borderRadius={15}
+                    boxSize="300px"
+                    src={image.url}
+                    objectFit="cover"
+                    fallback={
+                      <div 
+                        style={{
+                          width: '300px',
+                          height: '300px',
+                          backgroundColor: '#2D3748',
+                          borderRadius: '15px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#A0AEC0',
+                          padding: '20px',
+                          textAlign: 'center'
+                        }}
+                      >
+                        <div style={{ fontSize: '18px', marginBottom: '10px' }}>📷</div>
+                        <div style={{ fontSize: '14px' }}>Failed to Load</div>
+                        <div style={{ fontSize: '12px', marginTop: '5px', opacity: 0.7 }}>
+                          {image.name}
+                        </div>
+                      </div>
+                    }
+                    onError={(e) => {
+                      console.error(`Failed to load image: ${image.url}`, e);
+                      
+                      // Check if it's a 403 error (access denied)
+                      const isAccessDenied = e.target.src.includes('quickstark-images.s3.amazonaws.com');
+                      
+                      // Send error to Datadog with more context
+                      datadogRum.addError(new Error(`Image load failed: ${image.name}`), {
+                        imageUrl: image.url,
+                        imageName: image.name,
+                        backend: activeBackend,
+                        errorType: isAccessDenied ? 'S3_ACCESS_DENIED' : 'GENERIC_LOAD_ERROR',
+                        httpStatus: isAccessDenied ? '403' : 'unknown'
+                      });
+                    }}
+                  ></Image>
+                  
+                  {/* Filename Overlay */}
+                  <Box
+                    position="absolute"
+                    bottom={0}
+                    left={0}
+                    right={0}
+                    background="linear-gradient(transparent, rgba(0,0,0,0.9))"
+                    p={4}
+                    pt={12}
+                  >
+                    <Text
+                      fontSize="lg"
+                      fontWeight="semibold"
+                      color="white"
+                      noOfLines={2}
+                      wordBreak="break-word"
+                      textShadow="0 2px 4px rgba(0,0,0,0.9)"
+                      letterSpacing="wide"
+                      lineHeight="shorter"
+                    >
+                      {image.name}
+                    </Text>
+                  </Box>
+                  
+                  {/* AI Details Content */}
+                  <Box
+                    position="relative"
+                    bg="gray.800"
+                    transition="all 0.3s ease-in-out"
+                  >
+                    
+                    <Collapsible.Root open={isDropdownOpen}>
+                      <Collapsible.Content>
+                        <VStack spacing={4} align="stretch" p={4} pb={12}>
+                          {/* Text Detected Section */}
+                          <Box>
+                            <Text fontSize="sm" fontWeight="bold" color="orange.300" mb={2}>
+                              Text Detected:
+                            </Text>
+                            {image.ai_text?.length > 0 ? (
+                              <Text 
+                                fontSize="xs" 
+                                color="gray.300"
+                                wordBreak="break-word"
+                                bg="gray.700"
+                                p={2}
+                                borderRadius="sm"
+                              >
+                                {image.ai_text.join(", ")}
+                              </Text>
+                            ) : (
+                              <Text fontSize="xs" color="gray.300" fontStyle="italic">
+                                No Text Detected
+                              </Text>
+                            )}
+                          </Box>
+
+                          {/* Tags Section */}
+                          <Box>
+                            <Text fontSize="sm" fontWeight="bold" color="green.300" mb={2}>
+                              Tags:
+                            </Text>
+                            {image.ai_labels?.length > 0 ? (
+                              <Wrap spacing={1}>
+                                {image.ai_labels.map((label, index) => (
+                                  <WrapItem key={index}>
+                                    <Tag.Root size="sm" colorScheme="green" variant="solid">
+                                      <Tag.Label>{label}</Tag.Label>
+                                    </Tag.Root>
+                                  </WrapItem>
+                                ))}
+                              </Wrap>
+                            ) : (
+                              <Text fontSize="xs" color="gray.300" fontStyle="italic">
+                                No Labels Detected
+                              </Text>
+                            )}
+                          </Box>
+                        </VStack>
+                      </Collapsible.Content>
+                    </Collapsible.Root>
+                  </Box>
+                    
+                    {/* Elegant Chevron */}
+                    <Box
+                      position="absolute"
+                      bottom={3}
+                      right={3}
+                      className="elegant-chevron"
+                      borderRadius="full"
+                      p={1.5}
+                      transform={isDropdownOpen ? "rotate(180deg)" : "rotate(0deg)"}
+                      _hover={{
+                        transform: isDropdownOpen ? "rotate(180deg) scale(1.1)" : "rotate(0deg) scale(1.1)"
+                      }}
+                      zIndex={10}
+                      cursor="pointer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleDropdown();
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={isDropdownOpen ? "Collapse AI details" : "Expand AI details"}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          toggleDropdown();
+                        }
+                      }}
+                      _focus={{
+                        outline: "2px solid",
+                        outlineColor: "purple.400",
+                        outlineOffset: "1px"
+                      }}
+                    >
+                      <FiChevronDown 
+                        size={12} 
+                        color="rgba(255,255,255,0.8)"
+                        style={{ 
+                          filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.6))',
+                          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+                        }} 
+                      />
+                    </Box>
+                  </Box>
+                </Box>
+              );
+            })
+          )}
         </SimpleGrid>
       </VStack>
     </Center>

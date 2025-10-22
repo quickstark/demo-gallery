@@ -1,13 +1,11 @@
-import { ChatIcon, DeleteIcon, WarningIcon } from "@chakra-ui/icons";
+import { FiMessageCircle, FiTrash2, FiAlertTriangle } from "react-icons/fi";
 import {
   Heading,
-  Divider,
+  Separator,
   Center,
   Link,
   List,
   ListItem,
-  ListIcon,
-  OrderedList,
   Text,
   VStack,
   Container,
@@ -17,14 +15,14 @@ import { useEffect } from "react";
 
 export default function About() {
   useEffect(() => {
-    console.log("About Page Loaded");
+    // Component mounted - analytics tracked via RUM
   }, []);
   return (
     <Center fontSize="1.2em">
       <VStack width="lg" spacing={4} align="left">
         <Container bg="gray.700" borderRadius={10} padding={5}>
+          <Heading size="lg" mb={3}>This site was built using</Heading>
           <Text fontSize="1.2em">
-            <Heading size="lg">This site was built using</Heading>
             <Link color="pink.500" href="https://github.com/" isExternal>
               Github
             </Link>
@@ -60,7 +58,7 @@ export default function About() {
             >
               Amazon Rekognition
             </Link>
-            ... <Text> and </Text>
+            ... and{" "}
             <Link color="pink.500" href="https://datadoghq.com" isExternal>
               Datadog
             </Link>
@@ -76,7 +74,7 @@ export default function About() {
         </Container>
         <Container bg="gray.700" borderRadius={10} padding={5} fontSize="1.2em">
           <Heading size="lg">Quick Instructions</Heading>
-          <OrderedList>
+          <List.Root as="ol" styleType="decimal">
             <ListItem>Upload a picture.</ListItem>
             <ListItem>
               If your pic contains the word "Error" or "Errors" or contains an
@@ -84,30 +82,23 @@ export default function About() {
               error.
             </ListItem>
             <ListItem>Then try clicking a button</ListItem>
-            <Divider margin={5} size="md" />
-          </OrderedList>
+            <Separator margin={5} size="md" />
+          </List.Root>
           <Text>
-            <WarningIcon color="yellow.500"></WarningIcon>
+            <FiAlertTriangle color="yellow.500" style={{display: 'inline'}} />
             {" - "}
             sends an Error with your Image Name + Labels.
           </Text>
           <Text>
-            <ChatIcon color="yellow.500"></ChatIcon>
+            <FiMessageCircle color="yellow.500" style={{display: 'inline'}} />
             {" - "}
             traps an Unhandled Error with Feedback.
           </Text>
           <Text>
-            <DeleteIcon color="red.500"></DeleteIcon>
+            <FiTrash2 color="red.500" style={{display: 'inline'}} />
             {" - "}
             deletes a picture.
           </Text>
-        </Container>
-        <Container
-          bg="green.900"
-          borderRadius={10}
-          padding={5}
-          fontSize="1.2em"
-        >
         </Container>
       </VStack>
     </Center>

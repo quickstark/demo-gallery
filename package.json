@@ -6,27 +6,32 @@
     "start": "npx http-server ./dist",
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "eslint src --ext .js,.jsx",
+    "lint:fix": "eslint src --ext .js,.jsx --fix"
   },
   "dependencies": {
-    "@chakra-ui/icons": "^2.1.1",
-    "@chakra-ui/react": "^2.8.2",
-    "@datadog/browser-rum": "^5.22.0",
-    "@emotion/react": "^11.11.0",
-    "@emotion/styled": "^11.11.0",
-    "axios": "^1.4.0",
+    "@chakra-ui/react": "^3.21.0",
+    "@datadog/browser-logs": "^6.5.1",
+    "@datadog/browser-rum": "^6.5.1",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@kyletaylored/datadog-rum-interceptor": "^0.0.9",
+    "axios": "^1.8.3",
     "browser-image-compression": "^2.0.2",
-    "framer-motion": "^10.12.14",
+    "framer-motion": "^10.16.4",
     "history": "^5.3.0",
     "react": "^18.2.0",
-    "react-dom": "^18.0.0",
-    "react-medium-image-zoom": "^5.1.10",
-    "react-router-dom": "^6.11.2"
+    "react-dom": "^18.2.0",
+    "react-icons": "^5.5.0",
+    "react-medium-image-zoom": "^5.2.14",
+    "react-router-dom": "^6.22.3"
   },
   "devDependencies": {
-    "@types/react": "^18.0.0",
-    "@types/react-dom": "^18.0.0",
-    "@vitejs/plugin-react": "^3.0.1",
-    "vite": "^4.3.5"
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^4.3.4",
+    "playwright": "^1.53.1",
+    "vite": "^6.2.2"
   }
 }

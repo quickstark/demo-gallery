@@ -1,0 +1,403 @@
+name: Build and Deploy Gallery (Self-Hosted Runner)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # Allow manual trigger
+    inputs:
+      skip_build:
+        description: 'Skip Docker build'
+        required: false
+        default: false
+        type: boolean
+      skip_deploy:
+        description: 'Skip deployment (build only)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for proper versioning
+
+      # Install Datadog CI early in the workflow
+      - name: Install Datadog CI
+        id: datadog_setup
+        continue-on-error: true
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          DD_APP_KEY: ${{ secrets.DD_APP_KEY }}
+          DD_SITE: datadoghq.com
+        run: |
+          echo "=========================================="
+          echo "Setting up Datadog CI"
+          echo "=========================================="
+
+          # Check if datadog-ci.sh exists and is executable
+          if [ -f "/tmp/datadog-ci.sh" ]; then
+            echo "✓ Found mounted datadog-ci.sh script"
+            chmod +x /tmp/datadog-ci.sh
+            if /tmp/datadog-ci.sh; then
+              echo "✅ Datadog CI installed successfully via script"
+              echo "datadog_ci_available=true" >> $GITHUB_OUTPUT
+            else
+              echo "⚠️  datadog-ci.sh script failed, trying manual installation..."
+            fi
+          else
+            echo "⚠️  /tmp/datadog-ci.sh not found, trying manual installation..."
+          fi
+
+          # Fallback: Try manual installation if script failed or doesn't exist
+          if ! command -v datadog-ci &> /dev/null; then
+            if command -v npm &> /dev/null; then
+              echo "Installing datadog-ci globally..."
+              npm install -g @datadog/datadog-ci
+              if command -v datadog-ci &> /dev/null; then
+                echo "✅ Datadog CI installed via npm"
+                echo "datadog_ci_available=true" >> $GITHUB_OUTPUT
+              else
+                echo "❌ Failed to install datadog-ci"
+                echo "datadog_ci_available=false" >> $GITHUB_OUTPUT
+              fi
+            else
+              echo "❌ npm not available, cannot install datadog-ci"
+              echo "datadog_ci_available=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+          # Verify installation and set output variable
+          if command -v datadog-ci &> /dev/null; then
+            echo "✓ datadog-ci version: $(datadog-ci version)"
+            echo "✓ DD_API_KEY: ${DD_API_KEY:0:8}..."
+            echo "✓ DD_SITE: $DD_SITE"
+            echo "datadog_ci_available=true" >> $GITHUB_OUTPUT
+            echo "✅ Datadog CI is ready for use"
+          else
+            echo "❌ datadog-ci not available after installation attempts"
+            echo "datadog_ci_available=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Read VERSION file for semantic versioning
+      - name: Read VERSION
+        id: version
+        run: |
+          BASE_VERSION=$(cat VERSION | tr -d '[:space:]')
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
+          VERSION="${BASE_VERSION}-${SHORT_SHA}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Deployment Version: $VERSION (base: $BASE_VERSION, commit: $SHORT_SHA)"
+
+      # ===== SonarQube Analysis =====
+      - name: Install SonarQube Dependencies
+        run: |
+          # Check if unzip is available, install if not
+          if ! command -v unzip &> /dev/null; then
+            echo "Installing unzip for SonarQube scanner..."
+            if command -v apt-get &> /dev/null; then
+              sudo apt-get update && sudo apt-get install -y unzip
+            elif command -v apk &> /dev/null; then
+              apk add --no-cache unzip
+            elif command -v yum &> /dev/null; then
+              sudo yum install -y unzip
+            else
+              echo "Warning: Cannot install unzip - SonarQube scan may fail"
+            fi
+          else
+            echo "✓ unzip is already available"
+          fi
+        continue-on-error: true
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        continue-on-error: true
+
+      - name: SonarQube Metrics to Datadog
+        id: sonarqube_metrics
+        continue-on-error: true
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: |
+          # Skip if no credentials
+          if [ -z "$SONAR_TOKEN" ] || [ -z "$SONAR_HOST_URL" ]; then
+            echo "⚠️  SonarQube credentials not configured - skipping metrics"
+            exit 0
+          fi
+
+          echo "📊 Collecting SonarQube Metrics for Datadog"
+          sleep 3  # Wait for processing
+
+          # Note: Update this PROJECT ID with your actual SonarQube project key
+          PROJECT="demo-gallery"
+          METRICS=$(curl -s -u "$SONAR_TOKEN:" \
+            "$SONAR_HOST_URL/api/measures/component?component=${PROJECT}&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density" \
+            2>/dev/null) || METRICS="{}"
+
+          BUGS=$(echo "$METRICS" | jq -r '.component.measures[] | select(.metric=="bugs") | .value // "0"' 2>/dev/null || echo "0")
+          VULNS=$(echo "$METRICS" | jq -r '.component.measures[] | select(.metric=="vulnerabilities") | .value // "0"' 2>/dev/null || echo "0")
+          SMELLS=$(echo "$METRICS" | jq -r '.component.measures[] | select(.metric=="code_smells") | .value // "0"' 2>/dev/null || echo "0")
+          COVERAGE=$(echo "$METRICS" | jq -r '.component.measures[] | select(.metric=="coverage") | .value // "0"' 2>/dev/null || echo "0")
+
+          # Send quality metrics to Datadog via DogStatsD
+          if command -v nc &> /dev/null; then
+            echo "sonarqube.bugs:$BUGS|g|#project:demo-gallery,branch:${{ github.ref_name }}" | nc -u -w1 127.0.0.1 8125 2>/dev/null || true
+            echo "sonarqube.vulnerabilities:$VULNS|g|#project:demo-gallery,branch:${{ github.ref_name }}" | nc -u -w1 127.0.0.1 8125 2>/dev/null || true
+            echo "sonarqube.code_smells:$SMELLS|g|#project:demo-gallery,branch:${{ github.ref_name }}" | nc -u -w1 127.0.0.1 8125 2>/dev/null || true
+            echo "sonarqube.coverage:$COVERAGE|g|#project:demo-gallery,branch:${{ github.ref_name }}" | nc -u -w1 127.0.0.1 8125 2>/dev/null || true
+          fi
+
+          # Quality Gate Status
+          QG_STATUS=$(curl -s -u "$SONAR_TOKEN:" \
+            "$SONAR_HOST_URL/api/qualitygates/project_status?projectKey=${PROJECT}" \
+            | jq -r '.projectStatus.status' 2>/dev/null) || QG_STATUS="UNKNOWN"
+
+          # Display results
+          echo "📊 SonarQube Results:"
+          echo "  Bugs: $BUGS"
+          echo "  Vulnerabilities: $VULNS"
+          echo "  Code Smells: $SMELLS"
+          echo "  Coverage: $COVERAGE%"
+          echo "  Quality Gate: $QG_STATUS"
+
+      # ===== System Information =====
+      - name: System Information
+        run: |
+          echo "=== System Information ==="
+          echo "Hostname: $(hostname)"
+          echo "User: $(whoami)"
+          echo "Working Directory: $(pwd)"
+          echo "OS: $(uname -a)"
+          echo "=========================="
+
+      - name: Check Available Tools
+        run: |
+          echo "=== Checking Available Tools ==="
+
+          # Check Node.js
+          if command -v node &> /dev/null; then
+            echo "✓ Node: $(node --version)"
+          else
+            echo "✗ Node not found"
+          fi
+
+          # Check npm
+          if command -v npm &> /dev/null; then
+            echo "✓ npm: $(npm --version)"
+          else
+            echo "✗ npm not found"
+          fi
+
+          # Check Yarn
+          if command -v yarn &> /dev/null; then
+            echo "✓ Yarn: $(yarn --version)"
+          else
+            echo "✗ Yarn not found"
+          fi
+
+          # Check Docker
+          if command -v docker &> /dev/null; then
+            echo "✓ Docker: $(docker --version)"
+            if docker ps &> /dev/null; then
+              echo "  ✓ Docker daemon accessible"
+            else
+              echo "  ✗ Docker daemon not accessible (might need socket mount)"
+            fi
+          else
+            echo "✗ Docker not found"
+          fi
+
+          # Check Docker Compose
+          if command -v docker-compose &> /dev/null; then
+            echo "✓ Docker Compose: $(docker-compose --version)"
+          else
+            echo "✗ Docker Compose not found"
+          fi
+
+          # Check curl and other tools
+          command -v curl &> /dev/null && echo "✓ curl available" || echo "✗ curl not found"
+          command -v jq &> /dev/null && echo "✓ jq available" || echo "✗ jq not found"
+          command -v nc &> /dev/null && echo "✓ netcat available" || echo "✗ netcat not found"
+
+          echo "=========================="
+
+      # ===== Build and Push =====
+      - name: Build Docker Image
+        id: docker_build
+        if: ${{ !inputs.skip_build }}
+        run: |
+          if command -v docker &> /dev/null && docker ps &> /dev/null; then
+            echo "Building Docker image for React Gallery..."
+
+            # Login to Docker Hub
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login --username "${{ secrets.DOCKERHUB_USER }}" --password-stdin
+
+            # Build the image with git metadata for Datadog source code linking
+            docker build \
+              -t ${{ secrets.DOCKERHUB_USER }}/demo-gallery:latest \
+              --build-arg DD_GIT_REPOSITORY_URL=https://github.com/${{ github.repository }} \
+              --build-arg DD_GIT_COMMIT_SHA=${{ github.sha }} \
+              .
+
+            # Tag with version and commit SHA
+            docker tag ${{ secrets.DOCKERHUB_USER }}/demo-gallery:latest ${{ secrets.DOCKERHUB_USER }}/demo-gallery:${{ steps.version.outputs.version }}
+            docker tag ${{ secrets.DOCKERHUB_USER }}/demo-gallery:latest ${{ secrets.DOCKERHUB_USER }}/demo-gallery:${{ github.sha }}
+
+            # Push to Docker Hub
+            docker push ${{ secrets.DOCKERHUB_USER }}/demo-gallery:latest
+            docker push ${{ secrets.DOCKERHUB_USER }}/demo-gallery:${{ steps.version.outputs.version }}
+            docker push ${{ secrets.DOCKERHUB_USER }}/demo-gallery:${{ github.sha }}
+
+            echo "✅ Docker image built and pushed successfully"
+            echo "image_name=${{ secrets.DOCKERHUB_USER }}/demo-gallery:latest" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Docker not available or not accessible"
+            echo "If your runner is containerized, ensure Docker socket is mounted:"
+            echo "  -v /var/run/docker.sock:/var/run/docker.sock"
+            exit 1
+          fi
+
+      # ===== Deployment =====
+      - name: Deploy to Local Docker
+        if: ${{ !inputs.skip_deploy && steps.docker_build.outcome == 'success' }}
+        run: |
+          echo "=== Deploying React Gallery to Local Docker ==="
+
+          # Stop and remove existing container
+          echo "Stopping existing container..."
+          docker stop demo-gallery 2>/dev/null || echo "No existing container to stop"
+          docker rm -f demo-gallery 2>/dev/null || echo "No existing container to remove"
+
+          # Clean up old images to save space
+          echo "Cleaning up old images..."
+          docker image prune -f || true
+
+          # Pull the latest image (already pushed to Docker Hub)
+          echo "Pulling latest image from Docker Hub..."
+          docker pull ${{ secrets.DOCKERHUB_USER }}/demo-gallery:latest
+
+          # Run new container with production configuration
+          echo "Starting new container..."
+          docker run -d \
+            --name demo-gallery \
+            --restart unless-stopped \
+            -p 8080:80 \
+            --add-host=host.docker.internal:host-gateway \
+            -e VITE_API_URL="${{ secrets.VITE_API_URL }}" \
+            -e VITE_API_KEY="${{ secrets.VITE_API_KEY }}" \
+            -e VITE_AUTH_USERNAME="${{ secrets.VITE_AUTH_USERNAME }}" \
+            -e VITE_AUTH_PASSWORD="${{ secrets.VITE_AUTH_PASSWORD }}" \
+            -e VITE_ENVIRONMENT="${{ secrets.VITE_ENVIRONMENT || 'production' }}" \
+            -e VITE_DATADOG_APPLICATION_ID="${{ secrets.VITE_DATADOG_APPLICATION_ID }}" \
+            -e VITE_DATADOG_CLIENT_TOKEN="${{ secrets.VITE_DATADOG_CLIENT_TOKEN }}" \
+            -e VITE_DATADOG_SITE="${{ secrets.VITE_DATADOG_SITE || 'datadoghq.com' }}" \
+            -e VITE_DATADOG_SERVICE="${{ secrets.VITE_DATADOG_SERVICE || 'demo-gallery' }}" \
+            -e VITE_RELEASE="${{ steps.version.outputs.version }}" \
+            ${{ secrets.DOCKERHUB_USER }}/demo-gallery:latest
+
+          # Wait for container to start
+          echo "Waiting for container to start..."
+          sleep 10
+
+          # Check container status
+          echo "Container status:"
+          docker ps | grep demo-gallery || echo "Container not found in ps output"
+
+          # Check health endpoint
+          echo "Checking health endpoint..."
+          if curl -f http://localhost:8080/health 2>/dev/null; then
+            echo "✅ Health check passed - Gallery is running on port 8080"
+          elif curl -f http://localhost:8080/ 2>/dev/null; then
+            echo "✅ Root endpoint accessible on port 8080"
+          else
+            echo "⚠️  Health check failed - checking container logs..."
+            docker logs --tail 50 demo-gallery
+          fi
+
+          echo "✅ Deployment complete!"
+          echo "Application is running at: http://localhost:8080"
+
+      # ===== Post-Deployment =====
+      - name: Deployment Notification
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Deployment successful!"
+            echo "Commit: ${{ github.sha }}"
+            echo "Branch: ${{ github.ref_name }}"
+            echo "Actor: ${{ github.actor }}"
+            echo "Version: ${{ steps.version.outputs.version }}"
+          else
+            echo "❌ Deployment failed!"
+            echo "Check the logs above for details"
+          fi
+
+      # Mark Deployment in Datadog
+      - name: Mark Deployment in Datadog
+        if: steps.docker_build.outcome == 'success'
+        continue-on-error: true
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          DD_APP_KEY: ${{ secrets.DD_APP_KEY }}
+          DD_SITE: datadoghq.com
+          DD_ENV: ${{ secrets.DD_ENV || 'production' }}
+          DD_SERVICE: ${{ secrets.VITE_DATADOG_SERVICE || 'demo-gallery' }}
+          DD_GITHUB_JOB_NAME: build-and-deploy
+        run: |
+          echo "=========================================="
+          echo "Marking Deployment in Datadog"
+          echo "=========================================="
+
+          # Get short SHA for reference
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
+
+          echo "📦 Version: ${{ steps.version.outputs.version }}"
+          echo "🔖 Git SHA: $SHORT_SHA"
+          echo "🏷️  Service: $DD_SERVICE"
+          echo "🌍 Environment: $DD_ENV"
+          echo ""
+
+          # Check if datadog-ci is available
+          if ! command -v datadog-ci &> /dev/null; then
+            echo "⚠️  datadog-ci not available - skipping deployment marking"
+            exit 0
+          fi
+
+          echo "✓ Found datadog-ci: $(datadog-ci version)"
+          echo ""
+
+          # Mark deployment in Datadog CD Visibility
+          echo "Marking deployment in Datadog CD Visibility..."
+
+          if DD_BETA_COMMANDS_ENABLED=1 datadog-ci deployment mark \
+            --service "$DD_SERVICE" \
+            --env "$DD_ENV" \
+            --revision "${{ steps.version.outputs.version }}" \
+            --tags "deployment_method:self_hosted" \
+            --tags "repository:${{ github.repository }}" \
+            --tags "branch:${{ github.ref_name }}" \
+            --tags "git_sha:$SHORT_SHA" \
+            --tags "runner:containerized" \
+            --tags "app_type:react" \
+            --no-fail; then
+            echo ""
+            echo "✅ Deployment marked successfully in Datadog CD Visibility"
+            echo "🔗 View CD Deployments: https://app.datadoghq.com/ci/deployments?env=$DD_ENV"
+            echo "🔗 View RUM Deployments: https://app.datadoghq.com/rum/deployments?env=$DD_ENV"
+            echo ""
+          else
+            echo ""
+            echo "❌ Failed to mark deployment in Datadog"
+            echo "   Check DD_API_KEY and DD_BETA_COMMANDS_ENABLED"
+            echo ""
+          fi
