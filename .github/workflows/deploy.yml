@@ -1,4 +1,4 @@
-name: Build and Deploy Gallery (Self-Hosted Runner)
+name: Build & Deploy Images Gallery
 
 on:
   push:
